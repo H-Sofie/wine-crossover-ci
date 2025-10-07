@@ -1,6 +1,6 @@
 #!/usr/bin/env arch -x86_64 bash
 
-set -euo pipefail
+set -eo pipefail
 
 TMP_EXTRACT_DIR=""
 

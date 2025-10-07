@@ -49,7 +49,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          set -euo pipefail
+          set -eo pipefail
           sudo port -N install \
             bison \
             ccache \
@@ -59,7 +59,7 @@ jobs:
 
       - name: Install runtime dependencies
         run: |
-          set -euo pipefail
+          set -eo pipefail
           sudo port -N install \
             freetype \
             gettext-runtime \
@@ -70,22 +70,22 @@ jobs:
 
       - name: Download Crossover Sources
         run: |
-          set -euo pipefail
+          set -eo pipefail
           curl --fail --location --retry 3 --retry-delay 5 -o ${{ env.CROSS_OVER_LOCAL_FILE }}.tar.gz ${{ env.CROSS_OVER_SOURCE_URL }}
 
       - name: Extract Crossover Sources
         run: |
-          set -euo pipefail
+          set -eo pipefail
           tar xf ${{ env.CROSS_OVER_LOCAL_FILE }}.tar.gz
 
       - name: Add distversion.h
         run: |
-          set -euo pipefail
+          set -eo pipefail
           cp distversion.h sources/wine/programs/winedbg/distversion.h
 
       - name: Configure wine
         run: |
-          set -euo pipefail
+          set -eo pipefail
           mkdir -p ${{ env.BUILDROOT }}/winecx
           pushd ${{ env.BUILDROOT }}/winecx
           ${{ env.WINE_CONFIGURE }} \
@@ -128,7 +128,7 @@ jobs:
 
       - name: Build wine
         run: |
-          set -euo pipefail
+          set -eo pipefail
           pushd ${{ env.BUILDROOT }}/winecx
           JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc || echo 1)
           make -j"${JOBS}"
@@ -136,14 +136,14 @@ jobs:
 
       - name: Install wine
         run: |
-          set -euo pipefail
+          set -eo pipefail
           pushd ${{ env.BUILDROOT }}/winecx
           make install-lib DESTDIR="$GITHUB_WORKSPACE/${{ env.WINE_INSTALLROOT }}"
           popd
 
       - name: Tar wine
         run: |
-          set -euo pipefail
+          set -eo pipefail
           tar -czvf ${{ env.WINE_INSTALLATION }}.tar.gz ${{ env.WINE_INSTALLROOT }}
 
       - name: Uploading wine
