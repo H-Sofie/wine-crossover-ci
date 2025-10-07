@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Bootstrap MacPorts
-        run: .github/workflows/bootstrap.sh
+        run: sudo chmod +x .github/workflows/bootstrap.sh && .github/workflows/bootstrap.sh
 
       - name: Adding MacPorts into $PATH
         run: |
