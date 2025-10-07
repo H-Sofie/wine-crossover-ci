@@ -1,6 +1,16 @@
 #!/usr/bin/env arch -x86_64 bash
 
-set -e
+set -euo pipefail
+
+TMP_EXTRACT_DIR=""
+
+cleanup() {
+    if [[ -n "$TMP_EXTRACT_DIR" && -d "$TMP_EXTRACT_DIR" ]]; then
+        rm -rf "$TMP_EXTRACT_DIR"
+    fi
+}
+
+trap cleanup EXIT
 
 printtag() {
     # GitHub Actions tag format
@@ -17,15 +27,19 @@ endgroup() {
 
 export GITHUB_WORKSPACE=$(pwd)
 
-# Only suports building 25.1.0 or later
-if [ -z "$CROSS_OVER_VERSION" ]; then
-    export CROSS_OVER_VERSION="25.1.0"
-    echo "CROSS_OVER_VERSION not set building crossover-wine-${CROSS_OVER_VERSION}"
-fi
+# Only supports building 25.1.0 or later
+: "${CROSS_OVER_VERSION:=25.1.1}"
+echo "Building crossover-wine-${CROSS_OVER_VERSION}"
 
 # crossover source code to be downloaded
-export CROSS_OVER_SOURCE_URL=https://media.codeweavers.com/pub/crossover/source/crossover-sources-${CROSS_OVER_VERSION}.tar.gz
-export CROSS_OVER_LOCAL_FILE=crossover-${CROSS_OVER_VERSION}
+: "${CROSS_OVER_SOURCE_URL:=https://media.codeweavers.com/pub/crossover/source/crossover-sources-${CROSS_OVER_VERSION}.tar.gz}"
+: "${CROSS_OVER_LOCAL_FILE:=crossover-sources-${CROSS_OVER_VERSION}}"
+
+download_file() {
+    local url="$1"
+    local destination="$2"
+    curl --fail --location --retry 3 --retry-delay 5 -o "$destination" "$url"
+}
 
 # directories / files inside the downloaded tar file directory structure
 export WINE_CONFIGURE=$GITHUB_WORKSPACE/sources/wine/configure
@@ -40,24 +54,25 @@ export INSTALLROOT=$GITHUB_WORKSPACE/install
 export WINE_INSTALLATION=wine-cx${CROSS_OVER_VERSION}
 
 # Need to ensure port actually exists
-if ! command -v "/opt/local/bin/port" &> /dev/null
-then
+if ! command -v "/opt/local/bin/port" &> /dev/null; then
     echo "</opt/local/bin/port> could not be found"
     echo "A MacPorts installation is required"
-    exit
+    exit 1
 fi
 
 # Manually configure $PATH
 export PATH="/opt/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Library/Apple/usr/bin"
 
 
+PORT_CMD=(sudo port -N)
+
 begingroup "Installing dependencies build"
-sudo port install bison ccache gettext mingw-w64 pkgconfig
+"${PORT_CMD[@]}" install bison ccache gettext mingw-w64 pkgconfig
 endgroup
 
 
 begingroup "Installing dependencies libraries"
-sudo port install freetype gnutls-devel gettext-runtime libpcap libsdl2 moltenvk-latest
+"${PORT_CMD[@]}" install freetype gnutls-devel gettext-runtime libpcap libsdl2 moltenvk-latest
 endgroup
 
 
@@ -81,27 +96,40 @@ export ac_cv_lib_soname_vulkan=""
 
 if [[ ! -f ${CROSS_OVER_LOCAL_FILE}.tar.gz ]]; then
     begingroup "Downloading $CROSS_OVER_LOCAL_FILE"
-    curl -o ${CROSS_OVER_LOCAL_FILE}.tar.gz ${CROSS_OVER_SOURCE_URL}
+    download_file "${CROSS_OVER_SOURCE_URL}" "${CROSS_OVER_LOCAL_FILE}.tar.gz"
     endgroup
 fi
 
 
 begingroup "Extracting $CROSS_OVER_LOCAL_FILE"
-if [[ -d "${GITHUB_WORKSPACE}/sources" ]]; then
-    rm -rf ${GITHUB_WORKSPACE}/sources
+TMP_EXTRACT_DIR=$(mktemp -d "${GITHUB_WORKSPACE}/tmp.crossover.XXXXXX")
+tar xf "${CROSS_OVER_LOCAL_FILE}.tar.gz" -C "$TMP_EXTRACT_DIR"
+
+SOURCE_DIR=$(find "$TMP_EXTRACT_DIR" -maxdepth 2 -type d -path '*/sources' -print -quit || true)
+if [[ -z "$SOURCE_DIR" ]]; then
+    echo "Unable to locate sources directory inside archive" >&2
+    exit 1
 fi
-tar xf ${CROSS_OVER_LOCAL_FILE}.tar.gz
+
+rm -rf "${GITHUB_WORKSPACE}/sources"
+mkdir -p "${GITHUB_WORKSPACE}/sources"
+
+if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete "$SOURCE_DIR"/ "${GITHUB_WORKSPACE}/sources"/
+else
+    cp -R "$SOURCE_DIR"/. "${GITHUB_WORKSPACE}/sources"/
+fi
 endgroup
 
 
 begingroup "Add distversion.h"
-cp ${GITHUB_WORKSPACE}/distversion.h ${GITHUB_WORKSPACE}/sources/wine/programs/winedbg/distversion.h
+cp "${GITHUB_WORKSPACE}/distversion.h" "${GITHUB_WORKSPACE}/sources/wine/programs/winedbg/distversion.h"
 endgroup
 
 
 begingroup "Configure winecx-${CROSS_OVER_VERSION}"
-mkdir -p ${BUILDROOT}/winecx-${CROSS_OVER_VERSION}
-pushd ${BUILDROOT}/winecx-${CROSS_OVER_VERSION}
+mkdir -p "${BUILDROOT}/winecx-${CROSS_OVER_VERSION}"
+pushd "${BUILDROOT}/winecx-${CROSS_OVER_VERSION}"
 ${WINE_CONFIGURE} \
     --prefix= \
     --disable-tests \
@@ -142,15 +170,26 @@ popd
 endgroup
 
 
+cpu_count() {
+    local detected=""
+    if command -v sysctl >/dev/null 2>&1; then
+        detected=$(sysctl -n hw.ncpu 2>/dev/null || true)
+    fi
+    if [[ -z "$detected" ]] && command -v nproc >/dev/null 2>&1; then
+        detected=$(nproc)
+    fi
+    echo "${detected:-1}"
+}
+
 begingroup "Build winecx-${CROSS_OVER_VERSION}"
-pushd ${BUILDROOT}/winecx-${CROSS_OVER_VERSION}
-make -j$(sysctl -n hw.ncpu 2>/dev/null)
+pushd "${BUILDROOT}/winecx-${CROSS_OVER_VERSION}"
+make -j"$(cpu_count)"
 popd
 endgroup
 
 
 begingroup "Install winecx-${CROSS_OVER_VERSION}"
-pushd ${BUILDROOT}/winecx-${CROSS_OVER_VERSION}
+pushd "${BUILDROOT}/winecx-${CROSS_OVER_VERSION}"
 make install-lib DESTDIR="${INSTALLROOT}/${WINE_INSTALLATION}"
 popd
 endgroup

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 printtag() {
     # GitHub Actions tag format
@@ -32,7 +32,7 @@ MACPORTS_FILENAME=MacPorts-${MACPORTS_VERSION}-${OS_MAJOR}.tar.bz2
 
 
 begingroup "Fetching MacPorts..."
-/usr/bin/curl -fsSLO "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/${MACPORTS_FILENAME}" &
+/usr/bin/curl -fsSLO --retry 3 --retry-delay 5 "https://github.com/macports/macports-ci-files/releases/download/v${MACPORTS_VERSION}/${MACPORTS_FILENAME}" &
 curl_mpbase_pid=$!
 endgroup
 
@@ -53,16 +53,20 @@ endgroup
 
 begingroup "Uninstalling Homebrew"
 # Move directories to /opt/off
-echo "Moving directories..."
-sudo mkdir /opt/off
-/usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/off/ \;
+if [[ -d /opt/homebrew ]]; then
+    echo "Moving directories..."
+    sudo mkdir -p /opt/off
+    /usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type d -print -exec /bin/mv {} /opt/off/ \;
 
-# Unlink files
-echo "Removing files..."
-/usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type f -print -delete
+    # Unlink files
+    echo "Removing files..."
+    /usr/bin/sudo /usr/bin/find /opt/homebrew -mindepth 1 -maxdepth 1 -type f -print -delete
 
-# Rehash to forget about the deleted files
-hash -r
+    # Rehash to forget about the deleted files
+    hash -r
+else
+    echo "Homebrew directory not found; skipping removal"
+fi
 endgroup
 
 
@@ -104,7 +108,13 @@ endgroup
 
 begingroup "Cloning macports-wine"
 cd /opt
-sudo git clone --depth=1 https://github.com/Gcenx/macports-wine.git
+if [[ -d macports-wine/.git ]]; then
+    sudo git -C macports-wine fetch --depth=1 origin
+    HEAD_REF=$(sudo git -C macports-wine symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)
+    sudo git -C macports-wine reset --hard "$HEAD_REF"
+else
+    sudo git clone --depth=1 https://github.com/Gcenx/macports-wine.git
+fi
 endgroup
 
 

@@ -12,9 +12,9 @@ env:
   LIBRARY_PATH: /opt/local/lib
   CFLAGS: -O2
   # gcc14.1 now sets -Werror-incompatible-pointer-types
-  CROSSCFLAGS: -O2 -Wno-error=incompatible-pointer-types
+  CROSSCFLAGS: -O2 -Wno-incompatible-pointer-types
   LDFLAGS: -Wl,-headerpad_max_install_names -Wl,-rpath,@loader_path/../../ -Wl,-rpath,/opt/local/lib
-  MACOSX_DEPLOYMENT_TARGET: 15.6
+  MACOSX_DEPLOYMENT_TARGET: 10.15
   WINE_CONFIGURE: $GITHUB_WORKSPACE/sources/wine/configure
   BUILDROOT: $GITHUB_WORKSPACE/build
   WINE_INSTALLROOT: install
@@ -49,7 +49,8 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo port install \
+          set -euo pipefail
+          sudo port -N install \
             bison \
             ccache \
             gettext \
@@ -58,28 +59,33 @@ jobs:
 
       - name: Install runtime dependencies
         run: |
-          sudo port install \
+          set -euo pipefail
+          sudo port -N install \
             freetype \
             gettext-runtime \
             gnutls-devel \
-            libinotify \
-            moltenvk \
-            libsdl2
+            libpcap \
+            libsdl2 \
+            moltenvk-latest
 
       - name: Download Crossover Sources
         run: |
-          curl -o ${{ env.CROSS_OVER_LOCAL_FILE }}.tar.gz ${{ env.CROSS_OVER_SOURCE_URL }}
+          set -euo pipefail
+          curl --fail --location --retry 3 --retry-delay 5 -o ${{ env.CROSS_OVER_LOCAL_FILE }}.tar.gz ${{ env.CROSS_OVER_SOURCE_URL }}
 
       - name: Extract Crossover Sources
         run: |
+          set -euo pipefail
           tar xf ${{ env.CROSS_OVER_LOCAL_FILE }}.tar.gz
 
       - name: Add distversion.h
         run: |
+          set -euo pipefail
           cp distversion.h sources/wine/programs/winedbg/distversion.h
 
       - name: Configure wine
         run: |
+          set -euo pipefail
           mkdir -p ${{ env.BUILDROOT }}/winecx
           pushd ${{ env.BUILDROOT }}/winecx
           ${{ env.WINE_CONFIGURE }} \
@@ -100,7 +106,7 @@ jobs:
             --with-gnutls \
             --without-gssapi \
             --without-gstreamer \
-            --with-inotify \
+            --without-inotify \
             --without-krb5 \
             --with-mingw \
             --without-netapi \
@@ -122,18 +128,22 @@ jobs:
 
       - name: Build wine
         run: |
+          set -euo pipefail
           pushd ${{ env.BUILDROOT }}/winecx
-          make -j$(sysctl -n hw.ncpu 2>/dev/null)
+          JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc || echo 1)
+          make -j"${JOBS}"
           popd
 
       - name: Install wine
         run: |
+          set -euo pipefail
           pushd ${{ env.BUILDROOT }}/winecx
           make install-lib DESTDIR="$GITHUB_WORKSPACE/${{ env.WINE_INSTALLROOT }}"
           popd
 
       - name: Tar wine
         run: |
+          set -euo pipefail
           tar -czvf ${{ env.WINE_INSTALLATION }}.tar.gz ${{ env.WINE_INSTALLROOT }}
 
       - name: Uploading wine
